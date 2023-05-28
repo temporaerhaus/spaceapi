@@ -336,6 +336,10 @@ def update_doorstate():
         if abs(time - datetime.now(tzlocal())).total_seconds() > 60:
             raise ValueError('time', 'Time is too far in the future or past. Use NTP! (server time: %s)' % (datetime.now(tzlocal()).strftime("%s"),))
         time = datetime.now(tzlocal())
+        # shortcut for member state
+        if data['state'] == 'member':
+            data['state'] = 'opened'
+            data['message'] = 'member'
         if data['state'] not in DoorState.__members__:
             raise ValueError(
                 'state',
