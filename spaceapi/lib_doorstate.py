@@ -25,7 +25,7 @@ def add_key_arg(parser):
     """Add the --key argument to an argparser."""
     parser.add_argument(
         '--key',
-        type=argparse.FileType(mode='rb'),
+        type=argparse.FileType(mode='r'),
         required=True,
         help='Path to HMAC key file',
     )

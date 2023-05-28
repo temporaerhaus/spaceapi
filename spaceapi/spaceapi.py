@@ -5,6 +5,8 @@
 import argparse
 import hmac
 import os
+import sys
+import requests
 from datetime import datetime, timedelta
 from time import sleep
 
@@ -18,11 +20,11 @@ from lib_doorstate import (DoorState, add_debug_arg, add_host_arg, add_key_arg,
                            human_time_since, parse_args_and_read_key,
                            to_timestamp)
 
-WEBSITE_URL = 'https://fablab.fau.de'  # without trailing slash
-ADDRESS = 'Raum U1.239\nErwin-Rommel-Straße 60\n91058 Erlangen\nGermany'
-LAT = 49.574
-LON = 11.03
-PHONE = '+49 9131 85 28013'
+WEBSITE_URL = 'https://temporaerhaus.de'  # without trailing slash
+ADDRESS = 'Augsburger Str. 23-25, 89231 Neu-Ulm, Germany'
+LAT = 48.3962895 
+LON = 10.0019903
+# PHONE = '+49 9131 85 28013'
 
 
 def parse_args():
@@ -175,11 +177,16 @@ class OpeningPeriod(DB.Model):
 
 @APP.route('/')
 def root():
-    """Redirect to /spaceapi/."""
+    """Redirect to /."""
+    return redirect(url_for('spaceapi'), 301)
+
+@APP.route('/spaceapi/')
+def old_dir():
+    """Redirect to /."""
     return redirect(url_for('spaceapi'), 301)
 
 
-@APP.route('/spaceapi/')
+@APP.route('/spaceapi.json')
 def spaceapi():
     """
     Return the SpaceAPI JSON (spaceapi.net).
@@ -197,8 +204,8 @@ def spaceapi():
 
     return jsonify({
         'api': '0.13',
-        'space': 'FAU FabLab',
-        'logo': WEBSITE_URL + url_for('static', filename='logo_transparentbg.png'),
+        'space': 'temporärhaus',
+        'logo': WEBSITE_URL + '/spaceicons/logo.svg',
         'url': WEBSITE_URL + '/',
         'address': ADDRESS,
         'lat': LAT,
@@ -206,67 +213,68 @@ def spaceapi():
         'open': is_open,
         'status': state_message,
         'lastchange': state_last_change,
-        'phone': PHONE,
+        # 'phone': PHONE,
         'location': {
             'address': ADDRESS,
             'lat': LAT,
             'lon': LON,
         },
-        'spacefed': {
-            'spacenet': False,
-            'spacesaml': False,
-            'spacephone': False,
-        },
+        #'spacefed': {
+        #    'spacenet': False,
+        #    'spacesaml': False,
+        #    'spacephone': False,
+        #},
         'state': {
             'lastchange': state_last_change,
             'open': is_open,
             'message': state_message,
             'icon': {
-                'open': WEBSITE_URL + url_for('static', filename='logo_opened.png'),
-                'closed': WEBSITE_URL + url_for('static', filename='logo_closed.png'),
+                'open': WEBSITE_URL + '/spaceicons/tph-open.svg',
+                'closed': WEBSITE_URL + '/spaceicons/tph-closed.svg',
             },
         },
         'cache': {
             'schedule': "m.05",
         },
         'projects': [
-            WEBSITE_URL + '/project/',
-            "https://github.com/fau-fablab/",
+        #    WEBSITE_URL + '/project/',
+            "https://github.com/temporaerhaus/",
         ],
         'issue_report_channels': [
             "twitter",
-            "ml",
+            "email",
         ],
         'contact': {
-            'phone': PHONE,
-            'sip': 'sip:3280@hg.eventphone.de',
-            'twitter': "@FAUFabLab",
-            'ml': "fablab-aktive@fablab.fau.de",
-            'facebook': "https://facebook.com/FAUFabLab",
-            'google': {
-                'plus': "+FAUFabLabErlangen",
-            },
-            'issue_mail': 'c3BhY2VhcGlAZmFibGFiLmZhdS5kZQ==',  # base64 encoded
+            #'phone': PHONE,
+            #'sip': 'sip:3280@hg.eventphone.de',
+            'twitter': "@temporaerhaus",
+            'mastodon': "@temporaerhaus@chaos.social",
+            #'ml': "fablab-aktive@fablab.fau.de",
+            #'facebook': "https://facebook.com/FAUFabLab",
+            #'google': {
+            #    'plus': "+FAUFabLabErlangen",
+            #},
+            #'issue_mail': 'c3BhY2VhcGlAZmFibGFiLmZhdS5kZQ==',  # base64 encoded
+            'email': "kontakt@temporaerhaus.de"
         },
         'feeds': {
             'blog': {
                 'type': 'rss',
                 'url': WEBSITE_URL + '/feed/',
             },
-            # TODO wiki
             'calendar': {
                 'type': 'ical',
-                'url': WEBSITE_URL + '/termine/ical'
+                'url': 'https://calendar.google.com/calendar/ical/slaun4l80uh2s0ototiol4qkgo%40group.calendar.google.com/public/basic.ics'
             }
         },
         'icon': {
-            'open': WEBSITE_URL + url_for('static', filename='logo_opened.png'),
-            'closed': WEBSITE_URL + url_for('static', filename='logo_closed.png'),
+            'open': WEBSITE_URL + '/spaceicons/tph-open.svg',
+            'closed': WEBSITE_URL + '/spaceicons/tph-closed.svg',
         }
     })
 
 
-@APP.route('/spaceapi/door/', methods=('GET', ))
+@APP.route('/door/', methods=('GET', ))
 def get_doorstate():
     """Return the current door state."""
     latest_door_state = OpeningPeriod.get_latest_state()
@@ -275,13 +283,13 @@ def get_doorstate():
         text = 'Keine aktuellen Informationen über den Türstatus vorhanden.'
     elif not latest_door_state.is_open and \
             latest_door_state.closed.date() != datetime.now(tzlocal()).date():
-        text = 'Das FabLab war heute noch nicht geöffnet.'
+        text = 'Das TPH war heute noch nicht geöffnet.'
     elif not latest_door_state.is_open:
-        text = 'Das FabLab war zuletzt vor {} geöffnet.'.format(
+        text = 'Das TPH war zuletzt vor {} geöffnet.'.format(
             human_time_since(latest_door_state.closed)
         )
     elif latest_door_state.is_open:
-        text = 'Die FabLab-Tür ist seit {} offen.'.format(
+        text = 'Das TPH ist seit {} offen.'.format(
             human_time_since(latest_door_state.opened)
         )
     return jsonify({
@@ -291,10 +299,11 @@ def get_doorstate():
     })
 
 
-@APP.route('/spaceapi/door/', methods=('POST', ))
+@APP.route('/door/', methods=('POST', ))
 def update_doorstate():
     """Update doorstate (opened, close, ...)."""
-    required_params = {'time', 'state', 'hmac'}
+    required_params = {'time', 'state'}
+    #required_params = {'time', 'state', 'hmac'}
 
     data = request.json or request.form
 
@@ -303,16 +312,23 @@ def update_doorstate():
         for param in required_params:
             if not data.get(param, None):
                 raise ValueError(param, 'Parameter is missing')
-        if not hmac.compare_digest(
-            calculate_hmac(data['time'], data['state'], ARGS.key),
-            data['hmac']
-        ):
-            raise ValueError('hmac', 'HMAC digest is wrong. Do you have the right key?')
-        if not data['time'].isnumeric():
+        auth_header = request.headers.get('Authorization')
+        if auth_header:
+            auth_token = auth_header.split(" ")[1]
+        else:
+            auth_token = ''
+        #if not hmac.compare_digest(
+        #    calculate_hmac(data['time'], data['state'], ARGS.key),
+        #    data['hmac']
+        #):
+        if auth_token != ARGS.key:
+            raise ValueError('key', 'key is wrong. Do you have the right key?')
+        if not str(data['time']).isnumeric():
             raise ValueError('time', 'Time has to be an integer timestamp.')
         time = datetime.fromtimestamp(int(data['time']), tzlocal())
         if abs(time - datetime.now(tzlocal())).total_seconds() > 60:
-            raise ValueError('time', 'Time is too far in the future or past. Use NTP!')
+            raise ValueError('time', 'Time is too far in the future or past. Use NTP! (server time: %s)' % (datetime.now(tzlocal()).strftime("%s"),))
+        time = datetime.now(tzlocal())
         if data['state'] not in DoorState.__members__:
             raise ValueError(
                 'state',
@@ -322,6 +338,9 @@ def update_doorstate():
             )
         state = DoorState[data['state']]
         latest_door_state = OpeningPeriod.get_latest_state()
+        # update watchdog
+        if 'WATCHDOG_URL' in APP.config:
+            requests.get("%s?m=Door+now+%s" % (APP.config['WATCHDOG_URL'], state,))
         if latest_door_state:
             if latest_door_state.state == state:
                 # already opened/closed
@@ -344,6 +363,8 @@ def update_doorstate():
                 " To be honest, we don't have any data yet but the first entry has to be 'opened'.",
             })
     except ValueError as err:
+        #print(data, file=sys.stderr)
+        #print(err, file=sys.stderr)
         abort(400, {err.args[0]: err.args[1]})
 
     # update doorstate
@@ -373,7 +394,7 @@ def update_doorstate():
     })
 
 
-@APP.route('/spaceapi/door/all/', methods=('GET', ))
+@APP.route('/door/all/', methods=('GET', ))
 def get_doorstate_all():
     """Return the current door state. Filter by opened time using from and to."""
     try:
@@ -401,15 +422,15 @@ def get_doorstate_all():
     return jsonify([entry.to_dict() for entry in all_entries])
 
 
-@APP.route('/spaceapi/door/icon/', methods=('GET', ))
+@APP.route('/door/icon/', methods=('GET', ))
 def get_doorstate_icon():
     """Redirect to the icon that describes the current door state."""
     latest_door_state = OpeningPeriod.get_latest_state()
     outdated = Event.last_update_is_outdated() or not latest_door_state
-    logo_name = 'logo_transparentbg.png' if outdated else (
-        'logo_{}.png'.format(latest_door_state.state.name)
+    logo_name = 'logo.svg' if outdated else (
+        'tph-{}.svg'.format(latest_door_state.state.name)
     )
-    return redirect(url_for('static', filename=logo_name))
+    return redirect(WEBSITE_URL + '/spaceicons/' + logo_name)
 
 
 @APP.errorhandler(400)
