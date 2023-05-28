@@ -110,9 +110,8 @@ class Event(DB.Model):
         evt.timestamp = datetime.now()
         DB.session.commit()
 
-
 class OpeningPeriod(DB.Model):
-    """An entry for a time duration when the FabLab door was opened."""
+    """An entry for a time duration when the door was opened."""
 
     __tablename__ = 'openingperiod'
     opened = DB.Column(
@@ -125,16 +124,23 @@ class OpeningPeriod(DB.Model):
         DB.DateTime(timezone=True),
         nullable=True,
     )
+    message = DB.Column(
+        DB.String(length=255),
+        nullable=True,
+    )
 
-    def __init__(self, opened, closed=None):
+
+    def __init__(self, opened, closed=None, message=None):
         self.opened = opened
         self.closed = closed
+        self.message = message
 
     def __repr__(self):
-        return '{}({}, {})'.format(
+        return '{}({}, {}, {})'.format(
             self.__class__.__name__,
             repr(self.opened),
             repr(self.closed),
+            repr(self.message),
         )
 
     @property
@@ -167,6 +173,7 @@ class OpeningPeriod(DB.Model):
         return {
             'opened': self.opened_timestamp,
             'closed': self.closed_timestamp,
+            'message': self.message,
         }
 
     @classmethod
@@ -199,7 +206,7 @@ def spaceapi():
     is_open = not outdated and latest_door_state.is_open
     state_last_change = int(Event.get_last_update().timestamp.timestamp())
     state_message = 'doorstate is outdated' if outdated else (
-        'door is open' if is_open else 'door is closed'
+        latest_door_state.message or ('door is open' if is_open else 'door is closed')
     )
 
     return jsonify({
@@ -337,18 +344,43 @@ def update_doorstate():
                 )
             )
         state = DoorState[data['state']]
+        message = data.get('message', None)
         latest_door_state = OpeningPeriod.get_latest_state()
         # update watchdog
         if 'WATCHDOG_URL' in APP.config:
             requests.get("%s?m=Door+now+%s" % (APP.config['WATCHDOG_URL'], state,))
         if latest_door_state:
-            if latest_door_state.state == state:
+            if latest_door_state.state == state and latest_door_state.message == message:
                 # already opened/closed
                 Event.touch_last_update()
                 return jsonify({
                     'time': latest_door_state.last_change_timestamp,
                     'state': latest_door_state.state.name,
                     '_text': 'door was already {} at {}'.format(
+                        latest_door_state.state.name, latest_door_state.last_change_timestamp,
+                    ),
+                })
+            elif latest_door_state.state == state and state == DoorState.opened and latest_door_state.message != message:
+                # already opened but with different message
+                # close old entry
+                latest_door_state.closed = time
+                APP.logger.debug(
+                    'Closing door. Resulting entry: open from %(opened)i till %(closed)i',
+                    latest_door_state.to_dict()
+                )
+                DB.session.commit()
+                # open new entry
+                latest_door_state = OpeningPeriod(opened=time, message=message)
+                APP.logger.debug(
+                    'Re-Opening door. New entry: open from %(opened)i till t.b.a.',
+                    latest_door_state.to_dict()
+                )
+                DB.session.add(latest_door_state)
+                DB.session.commit()
+                return jsonify({
+                    'time': latest_door_state.last_change_timestamp,
+                    'state': latest_door_state.state.name,
+                    '_text': 'door is now {} (time: {}) but with different message'.format(
                         latest_door_state.state.name, latest_door_state.last_change_timestamp,
                     ),
                 })
@@ -375,7 +407,7 @@ def update_doorstate():
             latest_door_state.to_dict()
         )
     elif (not latest_door_state or not latest_door_state.is_open) and state == DoorState.opened:
-        latest_door_state = OpeningPeriod(opened=time)
+        latest_door_state = OpeningPeriod(opened=time, message=message)
         APP.logger.debug(
             'Opening door. New entry: open from %(opened)i till t.b.a.',
             latest_door_state.to_dict()
